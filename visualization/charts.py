@@ -50,10 +50,67 @@ class DashboardCharts:
         fig.update_layout(template=self.template, height=250, margin=dict(t=60,b=20,l=20,r=20))
         return fig
 
-    def create_audience_scatter(self, cp_df):
-        if not cp_df.empty:
-            return px.scatter(cp_df, x="CPC", y="CR", size="Conversions", color="Platform", hover_name="Age", title="Golden Audience", template=self.template)
-        return go.Figure()
+    def create_audience_scatter(self, audience_df):
+        """
+        Deep Dive / Audience grafiği:
+        - X: Age
+        - Y: CR (%)  (Conversion Rate)
+        - Bubble size: Clicks
+        - Color: Gender (varsa), yoksa tek renk
+
+        Beklenen kolonlar:
+        Age, Clicks, Conversions, CR, (opsiyonel) Gender, CPC
+        """
+        import plotly.graph_objects as go
+        import plotly.express as px
+
+        # Veri yoksa "no data" yazılı boş bir grafik dön
+        if audience_df is None or audience_df.empty:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Audience Conversion by Age & Gender (no data)",
+                template=self.template,
+                height=350,
+            )
+            return fig
+
+        df = audience_df.copy()
+
+        # Gerekli kolonlar var mı?
+        if "Age" not in df.columns or "CR" not in df.columns or "Clicks" not in df.columns:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Audience Conversion (unsupported schema)",
+                template=self.template,
+                height=350,
+            )
+            return fig
+
+        # Hover'da göstermek için mevcut kolonlardan seç
+        hover_cols = [c for c in ["Clicks", "Conversions", "CPC", "Spend"] if c in df.columns]
+
+        # Gender varsa renk olarak kullan
+        color_arg = "Gender" if "Gender" in df.columns else None
+
+        fig = px.scatter(
+            df,
+            x="Age",
+            y="CR",
+            size="Clicks",
+            color=color_arg,
+            hover_data=hover_cols,
+            title="Audience Conversion by Age & Gender",
+            template=self.template,
+        )
+
+        fig.update_layout(
+            yaxis_title="Conversion Rate (%)",
+            xaxis_title="Age",
+            height=350,
+        )
+
+        return fig
+
 
     def create_forecast_chart(self, daily, f_dates, f_vals):
         fig = go.Figure()
@@ -79,9 +136,52 @@ class DashboardCharts:
         return px.choropleth(geo_df, locations="Country", locationmode="ISO-3", color="CPC", hover_name="Country", color_continuous_scale="Blues", title="Global Cost Efficiency", template=self.template)
 
     def create_nlp_chart(self, nlp_df):
-        if not nlp_df.empty:
-            return px.scatter(nlp_df, x='Spend', y='CPC', size='Clicks', text='Word', color='CPC', color_continuous_scale='RdYlGn_r', title='Magic Words', template=self.template)
-        return go.Figure()
+        """
+        Magic Words grafiği:
+        analyzer.analyze_nlp() -> kolonlar: Keyword, Total_Clicks
+
+        Burada en basit ve anlamlı görsel:
+        - X: Keyword
+        - Y: Total_Clicks
+        """
+        import plotly.graph_objects as go
+        import plotly.express as px
+
+        if nlp_df is None or nlp_df.empty:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Magic Words (no data)",
+                template=self.template,
+                height=300,
+            )
+            return fig
+
+        # Beklenen kolonlar varsa bar chart çizelim
+        if "Keyword" in nlp_df.columns and "Total_Clicks" in nlp_df.columns:
+            df_plot = nlp_df.sort_values("Total_Clicks", ascending=False)
+
+            fig = px.bar(
+                df_plot,
+                x="Keyword",
+                y="Total_Clicks",
+                title="Magic Words (Top Keywords by Clicks)",
+                template=self.template,
+            )
+            fig.update_layout(
+                xaxis_tickangle=-45,
+                height=350,
+            )
+            return fig
+
+        # Fallback: şema uymuyorsa boş grafik
+        fig = go.Figure()
+        fig.update_layout(
+            title="Magic Words (unsupported data schema)",
+            template=self.template,
+            height=300,
+        )
+        return fig
+
 
     def create_ab_gauge(self, confidence, c1_name="Camp A", c2_name="Camp B"):
         # İsimler çok uzunsa grafiği bozmaması için ilk 15 karakteri alıp '...' koyabiliriz

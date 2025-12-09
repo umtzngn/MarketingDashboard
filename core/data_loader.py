@@ -1,129 +1,207 @@
-# data_loader.py
-import pandas as pd
-import numpy as np
-import glob
+# core/data_loader.py
 import os
-from datetime import datetime, timedelta
+import glob
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+
 from config.settings import COLUMN_MAPPING, COUNTRY_ISO_MAP
 
+
+# Hangi kolonları standart olarak beklediğimizi tanımlayalım
+CANONICAL_COLUMNS = list(COLUMN_MAPPING.keys())
+
+# Metrik kolonlar: numerik olacak, yoksa 0 ile doldurulacak
+METRIC_COLUMNS = ["Spend", "Clicks", "Impressions", "Reach", "Conversions"]
+
+
 class DataLoader:
-    def __init__(self, data_folder='.'):
+    """
+    Gerçek platform (Facebook / LinkedIn / Google Ads) verilerini
+    tek DataFrame'de birleştirip kolonları standart formata çevirir.
+    Kesinlikle random / mock data üretmez.
+    """
+
+    def __init__(self, data_folder: str = "."):
         self.data_folder = data_folder
-        self.df = None
+        self.df: pd.DataFrame | None = None
 
-    def load_data(self):
-        all_files = glob.glob(os.path.join(self.data_folder, "*.csv")) + \
-                    glob.glob(os.path.join(self.data_folder, "*.xlsx"))
-        
-        df_list = []
-        print(f"Dashboard System v9.1 Initialized. Found {len(all_files)} files.")
+    # -----------------------------
+    # Public API
+    # -----------------------------
+    def load_data(self) -> pd.DataFrame:
+        """
+        data_folder içindeki tüm CSV / Excel dosyalarını okur,
+        birleştirir ve standardize eder.
+        """
+        files = self._find_input_files()
 
-        for filename in all_files:
-            if os.path.basename(filename).startswith('~$'): continue 
-            try:
-                if filename.endswith('.csv'): 
-                    df_temp = pd.read_csv(filename)
-                else: 
-                    df_temp = pd.read_excel(filename)
-                
-                if df_temp.empty: continue
+        if not files:
+            raise FileNotFoundError(
+                f"No CSV/XLSX files found in folder: {self.data_folder}"
+            )
 
-                # Platform simulation based on filename if missing
-                current_cols = [c.lower() for c in df_temp.columns]
-                if not any(x in current_cols for x in ['platform', 'source']):
-                    fname_lower = filename.lower()
-                    if 'facebook' in fname_lower: p = 'Facebook'
-                    elif 'google' in fname_lower: p = 'Google Ads'
-                    elif 'linkedin' in fname_lower: p = 'LinkedIn'
-                    elif 'tiktok' in fname_lower: p = 'TikTok'
-                    else: p = 'Other'
-                    df_temp['Platform_Simulated'] = p
-                
-                df_list.append(df_temp)
-                print(f"   Read: {os.path.basename(filename)}")
-            except Exception as e:
-                print(f"   Error ({os.path.basename(filename)}): {str(e)}")
+        frames: list[pd.DataFrame] = []
+        for path in files:
+            df = self._read_single_file(path)
+            if df is None or df.empty:
+                continue
 
-        if not df_list:
-            print("No data found. Creating dummy data.")
-            self._create_dummy_data()
-        else:
-            self.df = pd.concat(df_list, ignore_index=True)
-            self._standardize_columns()
-        
-        return self.df
+            df["SourceFile"] = os.path.basename(path)
+            frames.append(df)
 
-    def _standardize_columns(self):
-        new_columns = {}
-        for col in self.df.columns:
-            col_lower = str(col).lower().strip()
-            mapped = False
-            for std_name, aliases in COLUMN_MAPPING.items():
-                if col_lower in aliases:
-                    new_columns[col] = std_name
-                    mapped = True
+        if not frames:
+            raise ValueError(
+                f"Input files found but could not read any data from: {files}"
+            )
+
+        raw = pd.concat(frames, ignore_index=True)
+        standardized = self._standardize_columns(raw)
+        self.df = standardized
+        return standardized
+
+    # -----------------------------
+    # Internal helpers
+    # -----------------------------
+    def _find_input_files(self) -> list[str]:
+        patterns = ["*.csv", "*.xlsx", "*.xls"]
+        files: list[str] = []
+        for pattern in patterns:
+            files.extend(glob.glob(os.path.join(self.data_folder, pattern)))
+        return files
+
+    def _read_single_file(self, path: str) -> pd.DataFrame | None:
+        ext = os.path.splitext(path)[1].lower()
+        try:
+            if ext == ".csv":
+                df = pd.read_csv(path)
+            else:
+                # .xlsx veya .xls
+                df = pd.read_excel(path)
+            return df
+        except Exception as e:
+            print(f"[DataLoader] Failed to read {path}: {e}")
+            return None
+
+    def _standardize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        - COLUMN_MAPPING'e göre kolon isimlerini canonical hale getirir
+        - Eksik canonical kolonları ekler (metrikler için 0, diğerleri için NaN)
+        - Tarih, ülke, platform gibi alanları temizler
+        """
+        df = df.copy()
+
+        # 1) Kolon isimlerini küçük harfe map'leyerek mapping yap
+        lower_to_original = {c.lower(): c for c in df.columns}
+
+        rename_map: dict[str, str] = {}
+
+        for canonical, candidates in COLUMN_MAPPING.items():
+            # Eğer zaten birebir bu isimde kolon varsa, onu kullan
+            if canonical in df.columns:
+                continue
+
+            found_original = None
+
+            # Aday isimlerden biri mevcut mu (case-insensitive)?
+            for cand in candidates:
+                cand_lower = cand.lower()
+                if cand_lower in lower_to_original:
+                    found_original = lower_to_original[cand_lower]
                     break
-            if not mapped and col == 'Platform_Simulated':
-                new_columns[col] = 'Platform'
-        self.df = self.df.rename(columns=new_columns)
-        
-        # Numeric Cleaning
-        for col in ['Spend', 'Clicks', 'Impressions', 'Conversions', 'Reach', 'Sentiment']:
-            if col not in self.df.columns: self.df[col] = 0
-            self.df[col] = pd.to_numeric(self.df[col], errors='coerce').fillna(0)
-            
-        # Simulation for missing critical data
-        if self.df['Conversions'].sum() == 0:
-            self.df['Conversions'] = (self.df['Clicks'] * np.random.uniform(0.02, 0.08, len(self.df))).astype(int)
 
-        if 'Country' not in self.df.columns:
-            self.df['Country'] = np.random.choice(['USA', 'GBR', 'DEU', 'TUR'], size=len(self.df))
+            if found_original is not None:
+                rename_map[found_original] = canonical
+
+        if rename_map:
+            df = df.rename(columns=rename_map)
+
+        # 2) Eksik canonical kolonlar için default değerler ekle
+        for col in CANONICAL_COLUMNS:
+            if col not in df.columns:
+                if col in METRIC_COLUMNS:
+                    df[col] = 0.0
+                else:
+                    df[col] = pd.NA
+
+        # 3) Tip dönüşümleri ve temizleme
+        df = self._clean_types_and_values(df)
+
+        return df
+
+    def _clean_types_and_values(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+
+        # --- Date ---
+        if "Date" in df.columns:
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+            # Tarihi olmayan satırlar çok kafa karıştırır, bunları atmak genelde daha iyi
+            df = df.dropna(subset=["Date"])
         else:
-            self.df['Country'] = self.df['Country'].apply(lambda x: COUNTRY_ISO_MAP.get(str(x).lower().strip(), str(x)))
+            # Normalde buraya düşmemesi lazım çünkü az önce ekledik,
+            # ama yine de koruma amaçlı:
+            df["Date"] = pd.NaT
 
-        if 'Device' not in self.df.columns:
-            self.df['Device'] = np.random.choice(['Mobile', 'Desktop', 'Tablet'], size=len(self.df), p=[0.7, 0.25, 0.05])
-        
-        if 'Placement' not in self.df.columns:
-            self.df['Placement'] = np.random.choice(['Feed', 'Story', 'Search', 'Reels'], size=len(self.df))
+        # --- Numeric metrikler ---
+        for col in METRIC_COLUMNS:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-        if self.df['Sentiment'].sum() == 0:
-             self.df['Sentiment'] = np.random.uniform(-0.5, 0.9, len(self.df))
-
-        for col in ['Campaign', 'AdName', 'Age', 'Gender', 'Platform']:
-            if col not in self.df.columns: self.df[col] = 'Unknown'
-            self.df[col] = self.df[col].fillna('Unknown').astype(str)
-
-        if 'Date' in self.df.columns:
-            self.df['Date'] = pd.to_datetime(self.df['Date'], errors='coerce')
+        # --- Platform ---
+        # Eğer Excel'den Platform kolonu dolu geliyorsa onu aynen kullan,
+        # boş/NaN olan satırlar için dosya isminden tahmin etmeye çalış.
+        if "Platform" in df.columns:
+            df["Platform"] = df["Platform"].astype(str).str.strip()
+            if "SourceFile" in df.columns:
+                mask_empty = df["Platform"].isin(["", "nan", "NaN"])
+                df.loc[mask_empty, "Platform"] = df.loc[mask_empty, "SourceFile"].apply(
+                    self._infer_platform_from_filename
+                )
+        elif "SourceFile" in df.columns:
+            df["Platform"] = df["SourceFile"].apply(
+                self._infer_platform_from_filename
+            )
         else:
-            self.df['Date'] = [datetime.now() - timedelta(days=x % 90) for x in range(len(self.df))]
-        self.df = self.df.dropna(subset=['Date'])
+            df["Platform"] = pd.NA
 
-        # Calculate Derived Metrics
-        self.df['CPC'] = np.where(self.df['Clicks'] > 0, self.df['Spend'] / self.df['Clicks'], 0)
-        self.df['CTR'] = np.where(self.df['Impressions'] > 0, (self.df['Clicks'] / self.df['Impressions']) * 100, 0)
-        self.df['CPM'] = np.where(self.df['Impressions'] > 0, (self.df['Spend'] / self.df['Impressions']) * 1000, 0)
-        self.df['Frequency'] = np.where(self.df['Reach'] > 0, self.df['Impressions'] / self.df['Reach'], 1)
-        self.df['CR'] = np.where(self.df['Clicks'] > 0, (self.df['Conversions'] / self.df['Clicks']) * 100, 0)
+        # --- Country -> ISO3 map ---
+        if "Country" in df.columns:
+            df["Country"] = df["Country"].astype(str).str.strip()
+            lower_map = {k.lower(): v for k, v in COUNTRY_ISO_MAP.items()}
 
-    def _create_dummy_data(self):
-        dates = pd.date_range(end=datetime.now(), periods=60).tolist() * 10
-        data = {
-            'Date': dates,
-            'Platform': ['Facebook', 'Google', 'Instagram'] * 200,
-            'Spend': np.random.randint(50, 800, 600),
-            'Clicks': np.random.randint(5, 80, 600),
-            'Impressions': np.random.randint(1000, 15000, 600),
-            'Reach': np.random.randint(800, 12000, 600),
-            'Campaign': [f'Camp_{i%8}' for i in range(600)],
-            'AdName': ['Ad_A', 'Ad_B', 'Ad_C'] * 200,
-            'Device': np.random.choice(['Mobile', 'Desktop'], 600),
-            'Placement': np.random.choice(['Feed', 'Story'], 600),
-            'Country': np.random.choice(['TUR', 'USA', 'GBR'], 600),
-            'Age': np.random.choice(['25-34', '35-44'], 600),
-            'Gender': np.random.choice(['Male', 'Female'], 600),
-            'Sentiment': np.random.uniform(-0.5, 0.9, 600)
-        }
-        self.df = pd.DataFrame(data)
-        self._standardize_columns()
+            def _map_country(val: str) -> str:
+                if not val or val.lower() in ["nan", "none"]:
+                    return val
+                # eğer zaten ISO3 formatında ise (3 harf, büyük) dokunma
+                if len(val) == 3 and val.isupper():
+                    return val
+                return lower_map.get(val.lower(), val)
+
+            df["Country"] = df["Country"].apply(_map_country)
+
+        # --- Age / Gender / Device / Placement / AdName / Campaign basit temizleme ---
+        for col in ["Age", "Gender", "Device", "Placement", "Campaign", "AdName"]:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+
+        # --- Sentiment ---
+        # Sentiment için ARTIK random üretim yok.
+        # Eğer Excel'den numeric bir kolon geliyorsa kullanılır, yoksa NaN kalır.
+        if "Sentiment" in df.columns:
+            df["Sentiment"] = pd.to_numeric(df["Sentiment"], errors="coerce")
+
+        return df
+
+    def _infer_platform_from_filename(self, filename: str) -> str:
+        """
+        Dosya adından platform tahmini.
+        Burada da random yok, sadece string eşleştirme var.
+        """
+        name = filename.lower()
+        if "facebook" in name or "meta" in name:
+            return "Facebook"
+        if "linkedin" in name:
+            return "LinkedIn"
+        if "google" in name or "adwords" in name or "ads_" in name:
+            return "Google Ads"
+        return "Unknown"
