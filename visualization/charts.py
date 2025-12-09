@@ -4,7 +4,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 
 class DashboardCharts:
-    def __init__(self, template='plotly_dark'):
+    def __init__(self, template='plotly_white'):
         self.template = template
 
     def create_trends_chart(self, trends_df):
@@ -199,3 +199,109 @@ class DashboardCharts:
         # Başlık artık 2 satır olduğu için t=80 yaparak üst boşluğu artırdık
         fig.update_layout(template=self.template, height=270, margin=dict(t=80, b=20, l=20, r=20))
         return fig
+    
+    def create_creative_fatigue_chart(self, fatigue_df):
+        """
+        Creative Fatigue grafiği:
+        - X: AdName
+        - Y: CTR_Slope (yüzde puan / hafta)
+        - Renk: Fatigue_Label
+        - Hover: Current_CTR, Avg_CTR, Total_Impressions
+        """
+        import plotly.express as px
+        import plotly.graph_objects as go
+
+        if fatigue_df is None or fatigue_df.empty:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Creative Fatigue (no data)",
+                template=self.template,
+                height=350,
+            )
+            return fig
+
+        df = fatigue_df.copy()
+
+        # En çok gösterim alan ilk 15 kreatifi göster
+        if "Total_Impressions" in df.columns:
+            df = df.sort_values("Total_Impressions", ascending=False).head(15)
+        else:
+            df = df.head(15)
+
+        hover_cols = [
+            c for c in ["Current_CTR", "Avg_CTR", "Total_Impressions"]
+            if c in df.columns
+        ]
+
+        color_arg = "Fatigue_Label" if "Fatigue_Label" in df.columns else None
+
+        fig = px.bar(
+            df,
+            x="AdName",
+            y="CTR_Slope",
+            color=color_arg,
+            hover_data=hover_cols,
+            title="Creative Fatigue (CTR Trend by Ad)",
+            template=self.template,
+        )
+
+        fig.update_layout(
+            xaxis_tickangle=-45,
+            yaxis_title="CTR Trend (percentage points / week)",
+            height=350,
+        )
+
+        return fig
+    
+    def create_frequency_chart(self, freq_df):
+        """
+        Frequency vs Performance grafiği.
+
+        - X: Frequency_Bucket
+        - Y: CTR_pct ve CVR_pct (yüzde olarak, iki ayrı bar)
+        """
+        import plotly.graph_objects as go
+
+        if freq_df is None or freq_df.empty:
+            fig = go.Figure()
+            fig.update_layout(
+                title="Frequency vs Performance (no data)",
+                template=self.template,
+                height=350,
+            )
+            return fig
+
+        df = freq_df.copy()
+
+        buckets = df["Frequency_Bucket"].tolist()
+        ctr = df["CTR_pct"].tolist()
+        cvr = df["CVR_pct"].tolist()
+
+        fig = go.Figure()
+
+        fig.add_trace(
+            go.Bar(
+                x=buckets,
+                y=ctr,
+                name="CTR (%)",
+            )
+        )
+        fig.add_trace(
+            go.Bar(
+                x=buckets,
+                y=cvr,
+                name="CVR (%)",
+            )
+        )
+
+        fig.update_layout(
+            barmode="group",
+            title="Frequency vs Performance (CTR & CVR)",
+            xaxis_title="Frequency (avg impressions per user)",
+            yaxis_title="Rate (%)",
+            template=self.template,
+            height=350,
+        )
+
+        return fig
+

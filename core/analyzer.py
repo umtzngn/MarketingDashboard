@@ -639,3 +639,213 @@ class MarketingAnalyzer:
 
     def analyze_nlp(self):
         return self.adname_keyword_analysis()
+    
+    # -------------------------------------------------------------
+    def analyze_creative_fatigue(self, min_impressions: int = 5000, min_weeks: int = 4):
+        """
+        Creative Fatigue Analizi:
+        AdName bazında haftalık CTR trendine bakar ve yorgunlaşan kreatifleri bulur.
+
+        Çıktı kolonları:
+        - AdName
+        - Current_CTR      : Son haftanın CTR (%) değeri
+        - Avg_CTR          : Tüm haftaların ortalama CTR (%)
+        - CTR_Slope        : Haftalık CTR eğimi (yüzde puan / hafta)
+        - Total_Impressions
+        - Fatigue_Label    : 'Fatiguing' veya 'Stable/Improving'
+        """
+        df = self.df.copy()
+
+        # Gerekli kolonlar yoksa boş dön
+        if "AdName" not in df.columns or "Date" not in df.columns:
+            return pd.DataFrame()
+
+        # Temel kolonları al
+        cols = ["Date", "AdName"]
+        for c in ["Impressions", "Clicks"]:
+            if c not in df.columns:
+                return pd.DataFrame()
+            cols.append(c)
+
+        df = df[cols].dropna()
+        if df.empty:
+            return pd.DataFrame()
+
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        df = df.dropna(subset=["Date"])
+        df = df[df["Impressions"] > 0]
+        if df.empty:
+            return pd.DataFrame()
+
+        # Haftalık agregasyon
+        df["Week"] = df["Date"].dt.to_period("W").apply(lambda r: r.start_time)
+        weekly = (
+            df.groupby(["AdName", "Week"], as_index=False)
+              .agg(
+                  Impressions=("Impressions", "sum"),
+                  Clicks=("Clicks", "sum"),
+              )
+        )
+        weekly["CTR"] = weekly["Clicks"] / weekly["Impressions"]
+        weekly = weekly.replace([np.inf, -np.inf], np.nan)
+
+        # Yeterli veri olmayanları ele
+        summary = (
+            weekly.groupby("AdName", as_index=False)
+                  .agg(
+                      total_impr=("Impressions", "sum"),
+                      weeks=("Week", "nunique"),
+                  )
+        )
+        summary = summary[
+            (summary["total_impr"] >= min_impressions) &
+            (summary["weeks"] >= min_weeks)
+        ]
+        if summary.empty:
+            return pd.DataFrame()
+
+        weekly = weekly.merge(summary[["AdName"]], on="AdName", how="inner")
+
+        # Her AdName için CTR ~ zaman eğimi
+        rows = []
+        for ad, grp in weekly.groupby("AdName"):
+            grp = grp.sort_values("Week")
+            if len(grp) < 2:
+                continue
+
+            y = grp["CTR"].values.astype(float)
+            if np.all(np.isnan(y)):
+                continue
+
+            # NaN’leri ortalamayla doldur
+            if np.any(np.isnan(y)):
+                m = np.nanmean(y)
+                y = np.where(np.isnan(y), m, y)
+
+            t = np.arange(len(y))  # 0,1,2,... haftalar
+            slope, intercept = np.polyfit(t, y, 1)
+
+            current_ctr = y[-1]
+            avg_ctr = y.mean()
+            total_impr = grp["Impressions"].sum()
+
+            rows.append({
+                "AdName": ad,
+                "Current_CTR": current_ctr * 100.0,
+                "Avg_CTR": avg_ctr * 100.0,
+                "CTR_Slope": slope * 100.0,  # yüzde puan / hafta
+                "Total_Impressions": total_impr,
+            })
+
+        if not rows:
+            return pd.DataFrame()
+
+        res = pd.DataFrame(rows)
+        res["Fatigue_Label"] = np.where(
+            res["CTR_Slope"] < 0,
+            "Fatiguing",
+            "Stable/Improving",
+        )
+
+        # En yorgun kreatifler en üstte
+        res = res.sort_values("CTR_Slope")  # en negatif en üstte
+        return res
+    
+    def analyze_frequency(self):
+        """
+        Frequency vs Performance analizi.
+
+        Varsayım:
+        - Impressions ve Reach kolonları var.
+        - Frequency = Impressions / Reach
+
+        Çıktı kolonları:
+        - Frequency_Bucket   : 1-2, 2-3, 3-5, 5-7, 7-10, 10+
+        - Impressions
+        - Reach
+        - Clicks
+        - Conversions
+        - Spend
+        - CTR_pct           : Clicks / Impressions * 100
+        - CVR_pct           : Conversions / Clicks * 100
+        - CPC               : Spend / Clicks
+        - CPA               : Spend / Conversions
+        """
+        df = self.df.copy()
+
+        required = ["Impressions", "Reach"]
+        for col in required:
+            if col not in df.columns:
+                return pd.DataFrame()
+
+        # Sadece mantıklı satırlar
+        df = df[(df["Impressions"] > 0) & (df["Reach"] > 0)]
+        if df.empty:
+            return pd.DataFrame()
+
+        # Temel kolonlar yoksa 0 ile dolduralım
+        for c in ["Clicks", "Conversions", "Spend"]:
+            if c not in df.columns:
+                df[c] = 0
+
+        # Frequency hesapla
+        df["Frequency"] = df["Impressions"] / df["Reach"]
+
+        # Çok uç değerleri kırp (örneğin 100+ frequency varsa)
+        df["Frequency"] = df["Frequency"].clip(lower=0.0, upper=50.0)
+
+        # Bucket tanımı
+        bins = [0.0, 1.5, 3.0, 5.0, 7.0, 10.0, 50.0]
+        labels = ["1–1.5", "1.5–3", "3–5", "5–7", "7–10", "10+"]
+
+        df["Frequency_Bucket"] = pd.cut(
+            df["Frequency"],
+            bins=bins,
+            labels=labels,
+            include_lowest=True,
+            right=True,
+        )
+
+        df = df.dropna(subset=["Frequency_Bucket"])
+        if df.empty:
+            return pd.DataFrame()
+
+        grouped = (
+            df.groupby("Frequency_Bucket", as_index=False)
+              .agg(
+                  Impressions=("Impressions", "sum"),
+                  Reach=("Reach", "sum"),
+                  Clicks=("Clicks", "sum"),
+                  Conversions=("Conversions", "sum"),
+                  Spend=("Spend", "sum"),
+              )
+        )
+
+        grouped["CTR_pct"] = np.where(
+            grouped["Impressions"] > 0,
+            grouped["Clicks"] / grouped["Impressions"] * 100.0,
+            np.nan,
+        )
+        grouped["CVR_pct"] = np.where(
+            grouped["Clicks"] > 0,
+            grouped["Conversions"] / grouped["Clicks"] * 100.0,
+            np.nan,
+        )
+        grouped["CPC"] = np.where(
+            grouped["Clicks"] > 0,
+            grouped["Spend"] / grouped["Clicks"],
+            np.nan,
+        )
+        grouped["CPA"] = np.where(
+            grouped["Conversions"] > 0,
+            grouped["Spend"] / grouped["Conversions"],
+            np.nan,
+        )
+
+        # Bucket sırasını koru
+        grouped["Frequency_Bucket"] = grouped["Frequency_Bucket"].astype(str)
+        grouped = grouped.set_index("Frequency_Bucket").reindex(labels).reset_index()
+
+        return grouped
+
+

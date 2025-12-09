@@ -29,6 +29,7 @@ def main():
     geo = analyzer.analyze_geo()
     nlp = analyzer.analyze_nlp()
     ab_conf, ab_winner, ab_details = analyzer.analyze_ab_stats()
+    freq = analyzer.analyze_frequency()
 
     # 3. Visualize
     viz = DashboardCharts()
@@ -49,6 +50,11 @@ def main():
     c1_name = ab_details.get('c1', '?')
     c2_name = ab_details.get('c2', '?')
     charts['ab_gauge'] = viz.create_ab_gauge(ab_conf, c1_name, c2_name)
+    creative_fatigue = analyzer.analyze_creative_fatigue()
+    charts['creative_fatigue'] = viz.create_creative_fatigue_chart(creative_fatigue)
+    charts['frequency'] = viz.create_frequency_chart(freq)
+    
+
 
     # 4. Generate Report
     builder = HTMLReportBuilder()

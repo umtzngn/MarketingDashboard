@@ -15,30 +15,9 @@ class HTMLReportBuilder:
             <title>Marketing Dashboard v9.1</title>
             <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
             <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;600&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
-            <style>
-                :root {{ --bg: #0b0c15; --card: #151621; --accent: #6c5ce7; --text: #dfe6e9; --green: #00b894; }}
-                body {{ font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; }}
-                .container {{ max-width: 1800px; margin: 0 auto; }}
-                
-                .grid-6 {{ display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; margin-bottom: 20px; }}
-                .grid-3 {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }}
-                .grid-2 {{ display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-bottom: 20px; }}
-                .grid-2-equal {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }}
-                
-                .card {{ background: var(--card); border-radius: 16px; padding: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); }}
-                .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding: 20px; background: linear-gradient(90deg, var(--card), #1e202e); border-radius: 16px; border-left: 5px solid var(--accent); }}
-                h1 {{ font-family: 'Space Grotesk', sans-serif; margin: 0; font-size: 26px; }}
-                h2 {{ font-size: 18px; color: var(--accent); margin: 40px 0 20px 0; border-bottom: 1px solid #333; padding-bottom: 10px; }}
-                
-                .kpi-card {{ background: linear-gradient(135deg, #1e202e, #151621); padding: 20px; border-radius: 12px; text-align: center; border-bottom: 3px solid var(--green); }}
-                .kpi-val {{ font-family: 'Space Grotesk'; font-size: 28px; font-weight: bold; color: #fff; }}
-                .kpi-lbl {{ font-size: 11px; text-transform: uppercase; color: #b2bec3; margin-top: 5px; }}
-
-                .sim-box {{ display: flex; flex-direction: column; justify-content: center; height: 100%; }}
-                .input-group {{ display: flex; align-items: center; justify-content: space-between; background: #2d3436; padding: 10px; border-radius: 8px; margin-bottom: 15px; }}
-                input[type=range] {{ width: 60%; accent-color: var(--accent); }}
-            </style>
+            <link rel="stylesheet" href="styles.css">
         </head>
+
         <body>
             <div class="container">
                 <div class="header">
@@ -97,9 +76,10 @@ class HTMLReportBuilder:
                 </div>
 
                 <h2>Fundamentals (Funnel & Breakdown)</h2>
-                <div class="grid-2-equal">
+                <div class="grid-3">
                     <div class="card">{charts['funnel'].to_html(full_html=False, include_plotlyjs=False)}</div>
                     <div class="card">{charts['sunburst'].to_html(full_html=False, include_plotlyjs=False)}</div>
+                    <div class="card">{charts['frequency'].to_html(full_html=False, include_plotlyjs=False)}</div>
                 </div>
 
                 <h2>Strategic Insights (Geo & Forecast)</h2>
@@ -108,9 +88,10 @@ class HTMLReportBuilder:
                     <div class="card">{charts['map'].to_html(full_html=False, include_plotlyjs=False)}</div>
                 </div>
 
-                <h2>Deep Dive (Audience & NLP)</h2>
-                <div class="grid-2-equal">
+                <h2>Deep Dive (Audience, Creatives & NLP)</h2>
+                <div class="grid-3">
                     <div class="card">{charts['audience'].to_html(full_html=False, include_plotlyjs=False)}</div>
+                    <div class="card">{charts['creative_fatigue'].to_html(full_html=False, include_plotlyjs=False)}</div>
                     <div class="card">{charts['nlp'].to_html(full_html=False, include_plotlyjs=False)}</div>
                 </div>
 
