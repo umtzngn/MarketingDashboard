@@ -28,7 +28,7 @@ def main():
     breakdown = analyzer.analyze_breakdown()
     geo = analyzer.analyze_geo()
     nlp = analyzer.analyze_nlp()
-    ab_conf, ab_winner, _ = analyzer.analyze_ab_stats()
+    ab_conf, ab_winner, ab_details = analyzer.analyze_ab_stats()
 
     # 3. Visualize
     viz = DashboardCharts()
@@ -46,7 +46,9 @@ def main():
     charts['anomaly'] = viz.create_anomaly_chart(anom)
     charts['map'] = viz.create_map(geo)
     charts['nlp'] = viz.create_nlp_chart(nlp)
-    charts['ab_gauge'] = viz.create_ab_gauge(ab_conf)
+    c1_name = ab_details.get('c1', '?')
+    c2_name = ab_details.get('c2', '?')
+    charts['ab_gauge'] = viz.create_ab_gauge(ab_conf, c1_name, c2_name)
 
     # 4. Generate Report
     builder = HTMLReportBuilder()

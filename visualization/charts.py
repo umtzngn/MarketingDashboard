@@ -83,10 +83,19 @@ class DashboardCharts:
             return px.scatter(nlp_df, x='Spend', y='CPC', size='Clicks', text='Word', color='CPC', color_continuous_scale='RdYlGn_r', title='Magic Words', template=self.template)
         return go.Figure()
 
-    def create_ab_gauge(self, confidence):
+    def create_ab_gauge(self, confidence, c1_name="Camp A", c2_name="Camp B"):
+        # İsimler çok uzunsa grafiği bozmaması için ilk 15 karakteri alıp '...' koyabiliriz
+        c1_display = (c1_name[:15] + '..') if len(c1_name) > 15 else c1_name
+        c2_display = (c2_name[:15] + '..') if len(c2_name) > 15 else c2_name
+
         fig = go.Figure(go.Indicator(
-            mode = "gauge+number", value = confidence, title = {'text': "A/B Confidence"},
+            mode = "gauge+number", 
+            value = confidence, 
+            # Başlığın altına HTML ile daha küçük ve gri renkte kampanya isimlerini ekliyoruz
+            title = {'text': f"A/B Confidence<br><span style='font-size:12px; color:#b2bec3'>{c1_display} vs {c2_display}</span>"},
             gauge = {'axis': {'range': [0, 100]}, 'bar': {'color': "#00cec9"}}
         ))
-        fig.update_layout(template=self.template, height=250, margin=dict(t=60,b=20,l=20,r=20))
+        
+        # Başlık artık 2 satır olduğu için t=80 yaparak üst boşluğu artırdık
+        fig.update_layout(template=self.template, height=270, margin=dict(t=80, b=20, l=20, r=20))
         return fig
